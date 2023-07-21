@@ -6,14 +6,14 @@ import yfinance as yf
 import os
 import sys
 
-def main(stop_loss_percentage, rsi_sell, macd_min):
+def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
         
     # ----------------------------------------------------------------------- #
     # ---------------------- Function Def and Setup  ------------------------ #
     # ----------------------------------------------------------------------- #
 
     # Redirect stdout to os.devnull
-    sys.stdout = open(os.devnull, 'w')
+    #sys.stdout = open(os.devnull, 'w')
 
     # Prevent a "string indices must be integers" TypeError 
     yf.pdr_override() 
@@ -62,17 +62,6 @@ def main(stop_loss_percentage, rsi_sell, macd_min):
     # ------------------------   Data Cleaning  ----------------------------- #
     # ----------------------------------------------------------------------- #
 
-    # Set the Price and Volume thresholds
-    minVol = 200000
-    minPrice = 15
-
-    # Bad Ticker List 
-    # - These have given Failed download warnings which I'm tired of looking at
-    bad_tickers = ['AMH','RCA','EAI','EMP','ZS','ETX','WFG','EDR','GMAB', 'PD',
-                   'BFC','SEB','SFB','CALX','PFXNZ','TTC','UNMA','CRAI','IRT',
-                   'SHOO', 'KE', 'HSBC', 'GIB', 'CSWCZ', 'BLCO','GRMN','CNA',
-                   'HTFB','AQNB','LRCX','OI','FIX']
-
     # Specify the list of tickers to use
     tickers = []
     with open("ticker_list.csv", 'r') as file:
@@ -83,14 +72,13 @@ def main(stop_loss_percentage, rsi_sell, macd_min):
             if (last_sale > minPrice 
                 and "^" not in ticker 
                 and "/" not in ticker 
-                and ticker not in bad_tickers
                 and len(ticker) < 6
             ):
                 tickers.append(ticker)
 
 
     # Fetch the historical pricing data for each ticker from Yahoo Finance
-    data = yf.download(tickers= tickers, start='2023-06-01', end='2023-07-19')
+    data = yf.download(tickers= tickers, start=start, end=end)
 
     # Calculate the average values in each column
     column_means = data['Volume'].mean()
@@ -141,7 +129,10 @@ def main(stop_loss_percentage, rsi_sell, macd_min):
                 buy_price = data.at[data.index[i], ticker]
 
             # Sell signal: RSI > rsi_sell
-            elif (rsi_data.at[rsi_data.index[i], ticker] > rsi_sell) or (holding and (data.at[data.index[i], ticker] <= buy_price * (1 - stop_loss_percentage))):
+            elif (rsi_data.at[rsi_data.index[i], ticker] > rsi_sell # high RSI
+                  or (holding and (data.at[data.index[i], ticker] <= buy_price * (1 - stop_loss_percentage))) # stop loss
+                  or macd_deriv_data.at[macd_deriv_data.index[i], ticker] < 0 # MACD curving downwards
+            ): 
                 signals.at[data.index[i], ticker] = -1  # -1 represents sell signal
                 holding = False
 
@@ -150,8 +141,8 @@ def main(stop_loss_percentage, rsi_sell, macd_min):
     # ----------------------------------------------------------------------- #
     
     # Define start_date and end_date
-    start_date = pd.to_datetime('2023-06-01')
-    end_date = pd.to_datetime('2023-07-19')
+    start_date = pd.to_datetime(start)
+    end_date = pd.to_datetime(end)
    
     # Filter signals and data based on the start and end dates
     signals = signals.loc[start_date:end_date]
@@ -187,36 +178,85 @@ def main(stop_loss_percentage, rsi_sell, macd_min):
 
     # Weight by number of tickers, i.o.w. equal allocation
     returns = returns.dropna(axis=1) # Drop columns with NaN values
-    returns = returns / len(signals.columns)
+    returns = returns / len(returns.columns)
     
     # Download historical price data for SPY and VTI using yfinance
     etf_tickers = ['SPY', 'VTI']
     etf_data = yf.download(etf_tickers, start=start_date, end=end_date)['Adj Close']
 
     # Say you bought SPY/VTI on start date, and sold on end date
-    spy_value = initial_investment - etf_data.at[etf_data.index[0],'SPY'] + etf_data.at[etf_data.index[-1],"SPY"]
-    vti_value = initial_investment - etf_data.at[etf_data.index[0],'VTI'] + etf_data.at[etf_data.index[-1],"VTI"]
-    spy_return = (100*(spy_value-initial_investment)/initial_investment)
-    vti_return = (100*(vti_value-initial_investment)/initial_investment)
+    # Relative return = final/initial * 100
+    spy_return = 100*(etf_data.at[etf_data.index[-1],"SPY"]/etf_data.at[etf_data.index[0],"SPY"] - 1)
+    vti_return = 100*(etf_data.at[etf_data.index[-1],"VTI"]/etf_data.at[etf_data.index[0],"VTI"] - 1)
 
     # Restore stdout
-    sys.stdout = sys.__stdout__
+    #sys.stdout = sys.__stdout__
 
     # Calculate the total portfolio return
-    print(returns)
+    #print(returns)
     returns['Total_Return'] = returns.sum(axis=1)
     investment = returns['Total_Return'].iloc[-1]
-    print(returns['Total_Return'])
+    #print(returns['Total_Return'])
 
     # Printing the cumulative returns DataFrame, total return of the strategy, and ETF returns
-    strategy_return = (100*(investment-initial_investment)/initial_investment)
-    print("\n\nstop_loss_percentage = %.2f, rsi_sell = %d, macd_min = %.2f" % (stop_loss_percentage,rsi_sell,macd_min))
+    strategy_return = 100*(investment/initial_investment - 1)
+    print("\n\nStart = %s, End = %s" % (start,end))
+    print("stop_loss_percentage = %.2f, rsi_sell = %d, macd_min = %.2f" % (stop_loss_percentage,rsi_sell,macd_min))
     print("Strategy Return = %.3f%%" % strategy_return)
     print("SPY Return = %.3f%%" % spy_return)
     print("VTI Return = %.3f%%" % vti_return)
-    print("alpha = ", (strategy_return - (spy_return + vti_return)/2))
+    print("alpha = %.3f%%" % (strategy_return - (spy_return + vti_return)/2))
 
-main(0.10,55,1.5)
-#main(0.10,55,1)
+main(0.02,55,1.5,'2022-01-01','2023-01-01',1000000,100)
+main(0.02,55,1.5,'2021-01-01','2022-01-01',1000000,100)
+main(0.02,55,1.5,'2020-01-01','2021-01-01',1000000,100)
+main(0.02,55,1.5,'2019-01-01','2020-01-01',1000000,100)
+main(0.02,55,1.5,'2018-01-01','2019-01-01',1000000,100)
+main(0.02,55,1.5,'2017-01-01','2018-01-01',1000000,100)
+
+'''
+For calculating alpha:
+all jan-01 to jan-01
+
+strat[1]:
+stop_loss_percentage = 0.20, rsi_sell = 55, macd_min = 1.50
+minVol = 200,000, minPrice = 20
+
+strat[2]:
+stop_loss_percentage = 0.10, rsi_sell = 55, macd_min = 1.50
+minVol = 200,000, minPrice = 100
+
+strat[3]:
+stop_loss_percentage = 0.10, rsi_sell = 55, macd_min = 1.50
+minVol = 200,000, minPrice = 200
+__________________________________________________________________________________________
+         |  2022-2023 ||  2021-2022 || 2020-2021 || 2019-2020 || 2018-2019 || 2017-2018 ||
+SPY      |   -19.95   ||    29.63   ||   17.24   ||   31.09   ||   -5.25   ||   20.78   ||
+VTI      |   -21.31   ||    26.64   ||   20.08   ||   30.57   ||   -5.90   ||   20.30   ||
+strat[1] |     0.30   ||     0.52   ||    0.33   ||    0.39   ||    0.17   ||    0.35   ||
+strat[2] |     1.23   ||     1.17   ||    1.38   ||    1.14   ||    0.42   ||    0.85   ||
+strat[3] |     3.31   ||     2.82   ||    2.87   ||    2.01   ||    0.48   ||    1.28   ||
+__________________________________________________________________________________________
 
 
+TODO: add actual alpha calculation. something like:
+
+import statsmodels.api as sm
+
+strategy_returns = pd.Series([0.02, 0.01, -0.01, 0.03, 0.02])
+market_returns = pd.Series([0.01, 0.02, 0.03, 0.02, 0.01])
+
+# Add a constant column for the regression intercept
+X = sm.add_constant(market_returns)
+
+# Perform linear regression
+model = sm.OLS(strategy_returns, X).fit()
+
+# Get the alpha and beta coefficients
+alpha, beta = model.params[0], model.params[1]
+
+print("Alpha:", alpha)
+print("Beta:", beta)
+
+
+'''
