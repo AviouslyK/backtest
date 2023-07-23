@@ -103,13 +103,12 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
     macd_deriv_data = data.apply(calculate_macd_second_derivative)
 
 
-    # Create a DataFrame to store trading signals
-    signals = pd.DataFrame(index=data.index, columns=data.columns)
-
-
     # ----------------------------------------------------------------------- #
     # ------------------------   Trading Strategy  -------------------------- #
     # ----------------------------------------------------------------------- #
+    '''
+    # Create a DataFrame to store trading signals
+    signals = pd.DataFrame(index=data.index, columns=data.columns)
 
     # Define the trading strategy
     for ticker in data.columns:
@@ -123,6 +122,7 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
                 and macd_deriv_data.at[macd_deriv_data.index[i], ticker] > 0 # MACD curving upwards
                 and macd_data.at[macd_data.index[i], ticker] <= -macd_min # MACD < threshold
                 and macd_data.at[macd_data.index[i], ticker] <= signal_data.at[signal_data.index[i], ticker] # MACD line < signal line
+                and not holding # don't buy if you already own
             ):
                 signals.at[data.index[i], ticker] = 1  # 1 represents buy signal
                 holding = True
@@ -135,6 +135,44 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
             ): 
                 signals.at[data.index[i], ticker] = -1  # -1 represents sell signal
                 holding = False
+    '''
+    # Define the trading strategy
+    
+    # Initialize signals DataFrame to store buy and sell signals
+    signals = pd.DataFrame(0, index=data.index, columns=data.columns)
+    # Dictionary for if we own each ticker
+    holding = {ticker: False for ticker in data.columns.tolist()}
+    # Dictionary containing each tickers original purchase price - for stop loss calculation
+    buy_price = {ticker: 0 for ticker in data.columns.tolist()}
+
+    max_holding = 1000 # don't want to own more than x stocks on any given day 
+
+    for i in range(1, len(data)): # Date loop
+        # How many stocks do we own right now?
+        num_holding = sum(value for value in holding.values() if value)
+        for ticker in data.columns: # ticker loop
+            # Buy signal:
+            if (rsi_data.at[rsi_data.index[i], ticker] < 30 # RSI < 30
+                and macd_deriv_data.at[macd_deriv_data.index[i], ticker] > 0 # MACD curving upwards
+                and macd_data.at[macd_data.index[i], ticker] <= -macd_min # MACD < threshold
+                and macd_data.at[macd_data.index[i], ticker] <= signal_data.at[signal_data.index[i], ticker] # MACD line < signal line
+                and not holding[ticker] # don't buy if you already own
+                and num_holding < max_holding # If we already own the max, can't buy another
+            ):
+                if holding[ticker] == False: # Don't buy if we already own
+                    signals.at[data.index[i], ticker] = 1  # 1 represents buy signal
+                    holding[ticker] = True
+                    buy_price[ticker] = data.at[data.index[i], ticker]
+
+            # Sell signal: RSI > rsi_sell
+            elif ((rsi_data.at[rsi_data.index[i], ticker] > rsi_sell # high RSI
+                  and macd_deriv_data.at[macd_deriv_data.index[i], ticker] < 0) # MACD curving downwards
+                  or (holding[ticker] and (data.at[data.index[i], ticker] <= buy_price[ticker] * (1 - stop_loss_percentage))) # stop loss
+                  #or macd_deriv_data.at[macd_deriv_data.index[i], ticker] < 0 # MACD curving downwards
+            ): 
+                if holding[ticker] == True: # can't sel if we don't own
+                    signals.at[data.index[i], ticker] = -1  # -1 represents sell signal
+                    holding[ticker] = False
 
     # ----------------------------------------------------------------------- #
     # -----------------------   Calculate Returns  -------------------------- #
@@ -148,10 +186,14 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
     signals = signals.loc[start_date:end_date]
     data = data.loc[start_date:end_date]
 
+    # Monitoring:
+    #monsig = signals.drop(columns=signals.columns[signals.eq(0).all()]).copy # Drop columns with all 0s
+    #print(monsig)
+    
     # Define the initial investment amount and initialize the returns DataFrame
     initial_investment = 10000
     # Holds the dollar value in your portfolio at any given day
-    returns = pd.DataFrame(index=signals.index, columns=tickers)
+    returns = pd.DataFrame(index=signals.index, columns=signals.columns)
     returns.iloc[0] = initial_investment
 
     # Calculate returns based on signals
@@ -160,9 +202,10 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
         holding = False
         for i in range(1, len(signals)): # Date loop
 
-            if signals.at[signals.index[i], ticker] == 1:  # Buy signal
+            if  signals.at[signals.index[i], ticker] == 1:  # Buy signal
                 purchase_price = data.at[data.index[i], ticker] # keep track of price you bought at
                 holding = True
+                returns.at[returns.index[i], ticker] = returns.at[returns.index[i - 1], ticker] # previous day
 
             elif signals.at[signals.index[i], ticker] == -1:  # Sell signal
                 # Current value is initial investment - purchase price + current price
@@ -177,7 +220,7 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
                 returns.at[returns.index[i], ticker] = returns.at[returns.index[i - 1], ticker]   
 
     # Weight by number of tickers, i.o.w. equal allocation
-    returns = returns.dropna(axis=1) # Drop columns with NaN values
+    #returns = returns.dropna(axis=1) # Drop columns with NaN values
     returns = returns / len(returns.columns)
     
     # Download historical price data for SPY and VTI using yfinance
@@ -193,26 +236,42 @@ def main(stop_loss_percentage, rsi_sell, macd_min,start,end,minVol,minPrice):
     #sys.stdout = sys.__stdout__
 
     # Calculate the total portfolio return
-    #print(returns)
+    
+    # Monitoring
+    #unique_value_counts = returns.apply(lambda col: col.nunique())
+    #monret = returns[unique_value_counts[unique_value_counts > 1].index].copy() # Drop the columns with return = 0
+    #print(monret)
+
     returns['Total_Return'] = returns.sum(axis=1)
     investment = returns['Total_Return'].iloc[-1]
     #print(returns['Total_Return'])
 
     # Printing the cumulative returns DataFrame, total return of the strategy, and ETF returns
     strategy_return = 100*(investment/initial_investment - 1)
+    alpha = strategy_return - (spy_return + vti_return)/2
     print("\n\nStart = %s, End = %s" % (start,end))
     print("stop_loss_percentage = %.2f, rsi_sell = %d, macd_min = %.2f" % (stop_loss_percentage,rsi_sell,macd_min))
     print("Strategy Return = %.3f%%" % strategy_return)
     print("SPY Return = %.3f%%" % spy_return)
     print("VTI Return = %.3f%%" % vti_return)
-    print("alpha = %.3f%%" % (strategy_return - (spy_return + vti_return)/2))
+    print("alpha = %.3f%%" % alpha)
 
-main(0.02,55,1.5,'2022-01-01','2023-01-01',1000000,100)
-main(0.02,55,1.5,'2021-01-01','2022-01-01',1000000,100)
-main(0.02,55,1.5,'2020-01-01','2021-01-01',1000000,100)
-main(0.02,55,1.5,'2019-01-01','2020-01-01',1000000,100)
-main(0.02,55,1.5,'2018-01-01','2019-01-01',1000000,100)
-main(0.02,55,1.5,'2017-01-01','2018-01-01',1000000,100)
+    #return alpha
+
+# Optimize config variables: rsi_sell, macd_min, etc.
+#stop_losses = [0.01,0.07,0.13]
+#rsi_sells = [50,60,70]
+#macd_mins = [0.75,1.5,2.25]
+#min_vols = [100000,500000,1000000]
+#min_prices = [50,150,250]
+
+#best_alpha =
+
+#for stop_loss in stop_losses:
+#    for rsi_sell in rsi_sells:
+#        for macd_min in macd_mins:  
+main(0.15,80,1,'2009-01-01','2010-01-01',200000,200)
+
 
 '''
 For calculating alpha:
@@ -233,10 +292,28 @@ ________________________________________________________________________________
          |  2022-2023 ||  2021-2022 || 2020-2021 || 2019-2020 || 2018-2019 || 2017-2018 ||
 SPY      |   -19.95   ||    29.63   ||   17.24   ||   31.09   ||   -5.25   ||   20.78   ||
 VTI      |   -21.31   ||    26.64   ||   20.08   ||   30.57   ||   -5.90   ||   20.30   ||
-strat[1] |     0.30   ||     0.52   ||    0.33   ||    0.39   ||    0.17   ||    0.35   ||
+strat[1] |     0.30   ||     0.52   ||    0.33   ||    0.39   ||    0.17   ||    0.35   || ....
 strat[2] |     1.23   ||     1.17   ||    1.38   ||    1.14   ||    0.42   ||    0.85   ||
 strat[3] |     3.31   ||     2.82   ||    2.87   ||    2.01   ||    0.48   ||    1.28   ||
 __________________________________________________________________________________________
+
+      __________________________________________________________________________________________
+               |  2016-2017 ||  2015-2016 || 2014-2015 || 2013-2014 || 2012-2013 || 2011-2012 ||
+      SPY      |    13.59   ||     1.29   ||   14.56   ||   29.00   ||   14.17   ||    0.85   ||
+      VTI      |    14.53   ||     0.43   ||   13.54   ||   30.15   ||   14.83   ||   -0.06   ||
+....  strat[1] |     ----   ||     ----   ||    ----   ||    ----   ||    ----   ||    ----   ||
+      strat[2] |     ----   ||     ----   ||    ----   ||    ----   ||    ----   ||    ----   ||
+      strat[3] |     0.73   ||     0.73   ||    0.64   ||    0.72   ||    0.39   ||    0.23   ||
+      __________________________________________________________________________________________
+
+      __________________________________________________________________________________________
+               |  2010-2011 ||  2009-2010 || 2008-2009 || 2007-2008 || 2006-2007 || 2005-2006 ||
+      SPY      |    13.14   ||    22.66   ||   -36.24  ||    5.33   ||    13.84  ||    5.33   ||
+      VTI      |    15.50   ||    25.29   ||   -36.23  ||    5.57   ||    14.01  ||    7.08   ||
+....  strat[1] |     ----   ||     ----   ||    ----   ||    ----   ||    ----   ||    ----   ||
+      strat[2] |     ----   ||     ----   ||    ----   ||    ----   ||    ----   ||    ----   ||
+      strat[3] |     0.34   ||     0.19   ||    0.08   ||    0.27   ||    0.20   ||    0.19   ||
+      __________________________________________________________________________________________
 
 
 TODO: add actual alpha calculation. something like:
