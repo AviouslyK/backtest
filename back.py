@@ -6,7 +6,7 @@ import yfinance as yf
 import os
 import sys
 
-def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, start, end, max_holding):
+def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, macd_diff, start, end, max_holding):
         
     # ----------------------------------------------------------------------- #
     # ---------------------- Function Def and Setup  ------------------------ #
@@ -88,7 +88,7 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, star
     holding = {ticker: False for ticker in data.columns.tolist()}
     # Dictionary containing each tickers original purchase price - for stop loss calculation
     buy_price = {ticker: 0 for ticker in data.columns.tolist()}
-
+    
     for i in range(1, len(data)): # Date loop
         for ticker in data.columns: # ticker loop
 
@@ -98,8 +98,9 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, star
             # Buy signal:
             if (rsi_data.at[rsi_data.index[i], ticker] < rsi_buy # RSI below threshold
                 and macd_deriv_data.at[macd_deriv_data.index[i], ticker] > 0 # MACD curving upwards
-                and macd_data.at[macd_data.index[i], ticker] <= -macd_min # MACD < threshold
-                and macd_data.at[macd_data.index[i], ticker] <= signal_data.at[signal_data.index[i], ticker] # MACD line < signal line
+                and macd_data.at[macd_data.index[i], ticker] <= macd_min # MACD < threshold
+                and macd_data.at[macd_data.index[i], ticker] <= signal_data.at[signal_data.index[i], ticker] # MACD line <= signal line
+                and abs(macd_data.at[macd_data.index[i], ticker] - signal_data.at[signal_data.index[i], ticker]) < macd_diff # |MACD line - signal line| < macd_min
                 and not holding[ticker] # don't buy if you already own
                 and num_holding < max_holding # If we already own the max, can't buy another
             ):
@@ -190,8 +191,8 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, star
 
     portfolio['Portfolio Value'] = portfolio.sum(axis=1)
     investment = portfolio['Portfolio Value'].iloc[-1] 
-    print("initial investment = ", initial_investment)
-    print("final portfolio value = ", investment)
+    #print("initial investment = ", initial_investment)
+    #print("final portfolio value = ", investment)
     #print(portfolio['Portfolio Value'])
 
     # Printing the cumulative portfolio DataFrame, total return of the strategy, and ETF returns
@@ -199,7 +200,7 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, star
     alpha = strategy_return - (spy_return + vti_return)/2
     print("\n\nStart = %s, End = %s" % (start,end))
     print("stop_loss_percentage = %.2f, rsi_sell = %d, macd_min = %.2f" % (stop_loss_percentage,rsi_sell,macd_min))
-    print("rsi_buy = %d, maxholding = %d" % (rsi_buy,max_holding))
+    print("rsi_buy = %d, maxholding = %d, macd_diff = %.2f" % (rsi_buy,max_holding,macd_diff))
     print("Strategy Return = %.3f%%" % strategy_return)
     print("SPY Return = %.3f%%" % spy_return)
     print("VTI Return = %.3f%%" % vti_return)
@@ -214,8 +215,8 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, star
 # ----------------------------------------------------------------------- #
 
 # Define Parameters
-start = '2007-01-01'
-end = '2023-01-01'
+start = '2022-01-01'
+end = '2023-07-01'
 start_date = pd.to_datetime(start)
 end_date = pd.to_datetime(end)
 minPrice = 20
@@ -259,11 +260,12 @@ etf_data = yf.download(etf_tickers, start=start_date, end=end_date)['Adj Close']
 # ----------------------------------------------------------------------- #
 
 # Run many iterations and find the best configuration of parameters
-stop_losses = [0.05]
-rsi_buys = [15,20]
-rsi_sells = [65,70]
-macd_mins = [1.5]
-max_holdings = [5,25]
+stop_losses = [0.04]
+rsi_buys = [30]
+rsi_sells = [50]
+macd_mins = [0]
+macd_diffs = [0.05,0.005]
+max_holdings = [8,20]
 
 best_alpha = float("-inf")
 best_combination = None
@@ -272,19 +274,23 @@ for stop_loss in stop_losses:
     for rsi_buy in rsi_buys:
         for rsi_sell in rsi_sells:
             for macd_min in macd_mins:  
-                for max_holding in max_holdings:
-                    # return alpha with this combo of parameters
-                    alpha_value = main(data,etf_data,stop_loss,rsi_buy,rsi_sell,macd_min,'2021-06-08','2023-07-18',max_holding)
+                for macd_diff in macd_diffs:
+                    for max_holding in max_holdings:
+                        # return alpha with this combo of parameters
+                        alpha_value = main(data,etf_data,stop_loss,rsi_buy,rsi_sell,macd_min,macd_diff,start,end,max_holding)
 
-                    if alpha_value > best_alpha:
-                        best_alpha = alpha_value
-                        best_combination = (stop_loss,rsi_buy,rsi_sell,macd_min,max_holding)
+                        if alpha_value > best_alpha:
+                            best_alpha = alpha_value
+                            best_combination = (stop_loss,rsi_buy,rsi_sell,macd_min,macd_diff,max_holding)
 
-print("Best Parameters were: (stop_loss,rsi_buy,rsi_sell,macd_min,max_holding) =  ", best_combination)
+print("Best Parameters were: (stop_loss,rsi_buy,rsi_sell,macd_min,macd_diff,max_holding) =  ", best_combination)
 print("With an alpha = ", best_alpha)
 
 
 '''
+Best Parameters were: (stop_loss,rsi_buy,rsi_sell,macd_min,max_holding) =   (0.1, 25, 75, 1, 8)
+With an alpha =  -110.99988727893118
+
 TODO: add actual alpha calculation. something like:
 
 import statsmodels.api as sm
