@@ -1,2 +1,2 @@
 # backtest
-Some simple python scripts to backtest variuos trading strategies
+Some simple python scripts to backtest various trading strategies
