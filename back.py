@@ -12,9 +12,6 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, macd
     # ---------------------- Function Def and Setup  ------------------------ #
     # ----------------------------------------------------------------------- #
 
-    # Redirect stdout to os.devnull
-    #sys.stdout = open(os.devnull, 'w')
-
     # Prevent a "string indices must be integers" TypeError 
     yf.pdr_override() 
 
@@ -56,13 +53,9 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, macd
 
         return macd_line
 
-
-
     # ----------------------------------------------------------------------- #
     # ------------------------   Data Cleaning  ----------------------------- #
     # ----------------------------------------------------------------------- #
-
-
 
     # Calculate RSI for each column (stock ticker) in the DataFrame
     rsi_data = data.apply(calculate_rsi)
@@ -70,11 +63,9 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, macd
     # Calculate the MACD and signal line for each column (stock ticker) in the DataFrame
     macd_data = data.apply(calculate_macd)
     signal_data = macd_data.ewm(span=9, adjust=False).mean()
-   
 
     # Calculate the second derivative of MACD for each column (stock ticker) in the DataFrame
     macd_deriv_data = data.apply(calculate_macd_second_derivative)
-
 
     # ----------------------------------------------------------------------- #
     # ------------------------   Trading Strategy  -------------------------- #
@@ -171,16 +162,11 @@ def main(data, etf_data, stop_loss_percentage, rsi_buy, rsi_sell, macd_min, macd
             else:  # Just take value from previous day, since you don't own the stock
                 portfolio.at[portfolio.index[i], ticker] = portfolio.at[portfolio.index[i - 1], ticker]   
 
-
-    #portfolio = portfolio.dropna(axis=1) # Drop columns with NaN values   
     
     # Say you bought SPY/VTI on start date, and sold on end date
     # Relative return = final/initial * 100
     spy_return = 100*(etf_data.at[etf_data.index[-1],"SPY"]/etf_data.at[etf_data.index[0],"SPY"] - 1)
     vti_return = 100*(etf_data.at[etf_data.index[-1],"VTI"]/etf_data.at[etf_data.index[0],"VTI"] - 1)
-
-    # Restore stdout
-    #sys.stdout = sys.__stdout__
 
     # Calculate the total portfolio return
     

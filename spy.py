@@ -11,13 +11,17 @@ args = parser.parse_args()
 short_MA = args.shortMA
 long_MA = args.longMA
 
+# First go through data and set signal to buy or sell
 def get_signals(data):
     data[str(short_MA) + '-day MA'] = data['Close'].rolling(window=short_MA).mean()
     data[str(long_MA) + '-day MA'] = data['Close'].rolling(window=long_MA).mean()
     signals = []
-    for i in range(1, len(data)):
+    # date loop
+    for i in range(1, len(data)): 
+        # if short term MA crosses above long term MA: buy
         if data[str(short_MA) + '-day MA'][i] > data[str(long_MA) + '-day MA'][i] and data[str(short_MA) + '-day MA'][i-1] <= data[str(long_MA) + '-day MA'][i-1]:
             signals.append('Buy')
+        # if short term MA crosses below long term MA: sell
         elif data[str(short_MA) + '-day MA'][i] < data[str(long_MA) + '-day MA'][i] and data[str(short_MA) + '-day MA'][i-1] >= data[str(long_MA) + '-day MA'][i-1]:
             signals.append('Sell')
         else:
@@ -27,6 +31,7 @@ def get_signals(data):
     data['Signal'] = signals
     return data
 
+# Now using buy/sell signals, simulate trading with a portfolio with a given initial balance
 def simulate_portfolio(data, initial_balance=1000.0):
     balance = initial_balance
     holdings = 0
@@ -55,6 +60,7 @@ def simulate_portfolio(data, initial_balance=1000.0):
     data['Portfolio Worth'] = portfolio_worth
     return data
 
+# Simulate the simple buy and hold strategy
 def simulate_buy_and_hold(data, initial_balance=1000.0):
     balance = initial_balance
     holdings = 0
@@ -73,47 +79,7 @@ def simulate_buy_and_hold(data, initial_balance=1000.0):
     data['Holding Worth'] = portfolio_worth
     return data
 
-'''
-# Plot the price of SPY overtime, as you buy and sell and below that
-def plot_signals(data): 
-    fig, (ax_top, ax_bottom) = plt.subplots(2, 1)
-
-    line_top = ax_top.plot(data.index, data['Close'], label='Close Price')
-    line_top = ax_top.plot(data.index, data[str(short_MA) + '-day MA'], label=str(short_MA) + '-day MA', linestyle='dashed')
-    line_top = ax_top.plot(data.index, data[str(long_MA) + '-day MA'], label=str(long_MA) + '-day MA', linestyle='dashed')
-    buy_signals = data[data['Moves'] == 'Buy']
-    ax_top.scatter(buy_signals.index, buy_signals['Close'], marker='^', color='g', label='Buy Signal', s=150)
-    sell_signals = data[data['Moves'] == 'Sell']
-    ax_top.scatter(sell_signals.index, sell_signals['Close'], marker='v', color='r', label='Sell Signal', s=150)
-    ax_top.set_xlabel('Date')
-    ax_top.set_ylabel('Stock Price')
-    ax_top.set_title('SPY Stock Price with Moving Averages and Buy/Sell Signals')
-    ax_top.legend()
-  
-    # Bottom Version 1: Portfolio Values
-    line_bottom1, = ax_bottom.plot(data.index, data['Portfolio Worth'], label='Portfolio Worth', color='blue')
-    line_bottom2, = ax_bottom.plot(data.index, data['Holding Worth'], label='Buy and Hold', color='red')
-    ax_bottom.set_xlabel('Date')
-    #ax_bottom.set_ylabel('Portfolio Worth ($)')
-    #ax_bottom.set_title('Portfolio Worth Over Time')
-    
-    # Set the visibility of the bottom plot to False (initially hidden)
-    line_bottom1.set_visible(False) 
-    line_bottom2.set_visible(False) 
-
-    # Bottom Version 2: Difference between portfolios
-    difference = data['Portfolio Worth'] - data['Holding Worth']
-    line_bottom3, = ax_bottom.plot(data.index, difference, label='Portfolio Worth - Holding Worth', color='purple')
-    ax_bottom.set_ylabel('Difference ($)')
-    ax_bottom.set_title('Difference between Portfolio Worth and Holding Worth Over Time')
-    ax_bottom.legend()
-    ax_bottom.legend()
-    
-
-    plt.tight_layout()
-    plt.show(block=False)
-'''
-
+# Compare the two strategies, and make some nice plots
 def main():
     spy_data = yf.download('SPY', start='1992-01-01', end='2023-01-01')
     spy_data = get_signals(spy_data)
@@ -138,8 +104,6 @@ def main():
     line_bottom1, = ax_bottom.plot(spy_data.index, spy_data['Portfolio Worth'], label='Strategy', color='blue')
     line_bottom2, = ax_bottom.plot(spy_data.index, spy_data['Holding Worth'], label='Buy and Hold', color='red')
     ax_bottom.set_xlabel('Date')
-    #ax_bottom.set_ylabel('Portfolio Worth ($)')
-    #ax_bottom.set_title('Portfolio Worth Over Time')
     
     # Set the visibility of the bottom plot to False (initially hidden)
     line_bottom1.set_visible(False) 
@@ -157,7 +121,6 @@ def main():
     ax_bottom.legend(visible_handles, visible_labels)
     
     plt.tight_layout()
-    #plt.show(block=False)
 
     # Create a toggle function to switch between the bottom plots
     def toggle_plot(event):
@@ -186,7 +149,7 @@ def main():
 
     toggle_plot.plot_type = 'Difference'
 
-    # Connect the toggle function to a key press event (in this example, we use the 't' key)
+    # Connect the toggle function to a key press event
     fig.canvas.mpl_connect('key_press_event', lambda event: toggle_plot(event))
 
     # Show the plot
